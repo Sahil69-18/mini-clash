@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mini Clash Prototype</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #111827;
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: white;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 360px;
+            height: 640px;
+            background: #1f2937;
+            border: 2px solid #374151;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+        }
+        canvas {
+            background: #10B981; /* Grass color */
+            width: 100%;
+            height: 500px;
+            border-bottom: 4px solid #374151;
+        }
+        #ui-panel {
+            flex: 1;
+            background: #111827;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+        }
+        #elixir-bar-container {
+            width: 100%;
+            height: 12px;
+            background: #374151;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        #elixir-bar {
+            width: 0%;
+            height: 100%;
+            background: #A855F7; /* Purple Elixir */
+            transition: width 0.1s linear;
+        }
+        #controls {
+            display: flex;
+            justify-content: space-around;
+            gap: 10px;
+        }
+        .card-btn {
+            flex: 1;
+            padding: 12px;
+            background: #3B82F6;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            text-align: center;
+            box-shadow: 0 4px #2563EB;
+        }
+        .card-btn:active {
+            box-shadow: 0 0 #2563EB;
+            transform: translateY(4px);
+        }
+        #status-text {
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="360" height="500"></canvas>
+    
+    <div id="ui-panel">
+        <div id="status-text">Elixir: <span id="elixir-count">0</span>/10</div>
+        <div id="elixir-bar-container">
+            <div id="elixir-bar"></div>
+        </div>
+        <div id="controls">
+            <button class="card-btn" onclick="spawnUnit('knight')">⚔️ Knight (3)</button>
+            <button class="card-btn" onclick="spawnUnit('archer')">🏹 Archer (2)</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    
+    // Game Variable Parameters
+    let elixir = 5;
+    let enemyElixir = 5;
+    let maxElixir = 10;
+    let units = [];
+    let gameOver = false;
+    let winner = "";
+
+    // Towers Configuration
+    const playerTower = { x: 180, y: 460, hp: 1000, maxHp: 1000, team: "player", radius: 25 };
+    const enemyTower = { x: 180, y: 40, hp: 1000, maxHp: 1000, team: "enemy", radius: 25 };
+
+    // Unit Types Templates
+    const UNIT_TYPES = {
+        knight: { hp: 250, damage: 30, speed: 1.2, range: 15, cost: 3, color: "#3B82F6", radius: 10 },
+        archer: { hp: 120, damage: 20, speed: 1.5, range: 60, cost: 2, color: "#60A5FA", radius: 8 },
+        eknight: { hp: 250, damage: 30, speed: -1.2, range: 15, cost: 3, color: "#EF4444", radius: 10 },
+        earcher: { hp: 120, damage: 20, speed: -1.5, range: 60, cost: 2, color: "#F87171", radius: 8 }
+    };
+
+    // Auto-charge system
+    setInterval(() => {
+        if (!gameOver) {
+            if (elixir < maxElixir) elixir = Math.min(maxElixir, elixir + 0.1);
+            if (enemyElixir < maxElixir) enemyElixir = Math.min(maxElixir, enemyElixir + 0.08);
+            
+            document.getElementById("elixir-count").innerText = Math.floor(elixir);
+            document.getElementById("elixir-bar").style.width = (elixir / maxElixir) * 100 + "%";
+        }
+    }, 100);
+
+    // AI Automation Spawner Loop
+    setInterval(() => {
+        if (!gameOver) {
+            if (enemyElixir >= 3) {
+                const choice = Math.random() > 0.5 ? 'eknight' : 'earcher';
+                units.push({
+                    ...UNIT_TYPES[choice],
+                    x: Math.random() * 260 + 50,
+                    y: 80,
+                    team: "enemy",
+                    lastAttack: 0
+                });
+                enemyElixir -= UNIT_TYPES[choice].cost;
+            }
+        }
+    }, 3000);
+
+    function spawnUnit(type) {
+        if (gameOver) return;
+        const cost = UNIT_TYPES[type].cost;
+        if (elixir >= cost) {
+            elixir -= cost;
+            units.push({
+                ...UNIT_TYPES[type],
+                x: Math.random() * 260 + 50,
+                y: 420,
+                team: "player",
+                lastAttack: 0
+            });
+        }
+    }
+
+    // Core Game Loop Engine
+    function update() {
+        if (gameOver) return;
+
+        units.forEach(unit => {
+            let target = null;
+            let closestDist = Infinity;
+
+            // Find closest enemy unit or tower
+            let potentialTargets = units.filter(u => u.team !== unit.team);
+            potentialTargets.push(unit.team === "player" ? enemyTower : playerTower);
+
+            potentialTargets.forEach(t => {
+                if(t.hp <= 0) return;
+                let dist = Math.hypot(t.x - unit.x, t.y - unit.y);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    target = t;
+                }
+            });
+
+            if (target) {
+                // If within range, stop moving and attack target
+                if (closestDist <= unit.range + (target.radius || 0)) {
+                    let now = Date.now();
+                    if (now - unit.lastAttack > 1000) { // Attack once per second
+                        target.hp -= unit.damage;
+                        unit.lastAttack = now;
+                        if(target.hp <= 0 && target.maxHp === 1000) {
+                            gameOver = true;
+                            winner = unit.team === "player" ? "Player Wins!" : "AI Wins!";
+                        }
+                    }
+                } else {
+                    // Move straight towards target pathing line
+                    let angle = Math.atan2(target.y - unit.y, target.x - unit.x);
+                    unit.x += Math.cos(angle) * Math.abs(unit.speed);
+                    unit.y += Math.sin(angle) * Math.abs(unit.speed);
+                }
+            }
+        });
+
+        // Clean up dead units from canvas arrays
+        units = units.filter(u => u.hp > 0);
+    }
+
+    function draw() {
+        // Clear Field Arena Canvas background
+        ctx.fillStyle = "#10B981";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Render Pathway River and Bridges decoration
+        ctx.fillStyle = "#3B82F6";
+        ctx.fillRect(0, canvas.height / 2 - 15, canvas.width, 30);
+        ctx.fillStyle = "#D1D5DB";
+        ctx.fillRect(60, canvas.height / 2 - 20, 50, 40);
+        ctx.fillRect(250, canvas.height / 2 - 20, 50, 40);
+
+        // Render Player Tower Base Target
+        if (playerTower.hp > 0) {
+            ctx.beginPath();
+            ctx.arc(playerTower.x, playerTower.y, playerTower.radius, 0, Math.PI * 2);
+            ctx.fillStyle = "#1E3A8A";
+            ctx.fill();
+            ctx.fillStyle = "white";
+            ctx.fillText(`HP: ${playerTower.hp}`, playerTower.x - 20, playerTower.y + 5);
+        }
+
+        // Render Enemy Tower Base Target
+        if (enemyTower.hp > 0) {
+            ctx.beginPath();
+            ctx.arc(enemyTower.x, enemyTower.y, enemyTower.radius, 0, Math.PI * 2);
+            ctx.fillStyle = "#7F1D1D";
+            ctx.fill();
+            ctx.fillStyle = "white";
+            ctx.fillText(`HP: ${enemyTower.hp}`, enemyTower.x - 20, enemyTower.y + 5);
+        }
+
+        // Render Active Units
+        units.forEach(unit => {
+            ctx.beginPath();
+            ctx.arc(unit.x, unit.y, unit.radius, 0, Math.PI * 2);
+            ctx.fillStyle = unit.color;
+            ctx.fill();
+            
+            // Render basic unit health status wireframes
+            ctx.fillStyle = "black";
+            ctx.fillRect(unit.x - 10, unit.y - 15, 20, 4);
+            ctx.fillStyle = "#10B981";
+            ctx.fillRect(unit.x - 10, unit.y - 15, (unit.hp / UNIT_TYPES[unit.range > 20 ? (unit.team === 'player'?'archer':'earcher') : (unit.team === 'player'?'knight':'eknight')].hp) * 20, 4);
+        });
+
+        // Handle Game Over Screen overlays
+        if (gameOver) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#F59E0B";
+            ctx.font = "bold 28px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(winner, canvas.width / 2, canvas.height / 2);
+        }
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+</script>
+
+</body>
+</html>
